@@ -1,0 +1,10 @@
+{
+  "name": "inventoryhub",
+  "version": "1.0.0",
+  "description": "Simple full-stack inventory app: Node.js JSON API plus a plain HTML/JS front end",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT"
+}

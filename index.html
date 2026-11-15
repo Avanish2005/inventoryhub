@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InventoryHub</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    h1 { margin-bottom: 0.25rem; }
+    form, .toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+    input { padding: 0.4rem; border: 1px solid #bbb; border-radius: 4px; }
+    button { padding: 0.4rem 0.8rem; border: 0; border-radius: 4px; background: #2563eb; color: #fff; cursor: pointer; }
+    button.secondary { background: #6b7280; }
+    button.danger { background: #dc2626; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #e5e7eb; }
+    #message { min-height: 1.5rem; }
+    .error { color: #b91c1c; }
+    .info { color: #047857; }
+    .pager { display: flex; align-items: center; gap: 0.75rem; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>InventoryHub</h1>
+  <p>Simple inventory manager (front end talking to a JSON API).</p>
+
+  <form id="item-form">
+    <input type="hidden" id="item-id">
+    <input id="name" placeholder="Name" required>
+    <input id="category" placeholder="Category">
+    <input id="quantity" type="number" min="0" step="1" placeholder="Quantity" required>
+    <input id="price" type="number" min="0" step="0.01" placeholder="Price" required>
+    <button type="submit" id="save-btn">Add item</button>
+    <button type="button" class="secondary" id="cancel-btn" hidden>Cancel</button>
+  </form>
+
+  <div class="toolbar">
+    <input id="search" placeholder="Search name or category...">
+  </div>
+
+  <div id="message"></div>
+
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Category</th><th>Qty</th><th>Price</th><th></th></tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <div class="pager">
+    <button id="prev" class="secondary">Previous</button>
+    <span id="page-info"></span>
+    <button id="next" class="secondary">Next</button>
+  </div>
+
+  <script>
+    const state = { page: 1, limit: 10, search: "" };
+    const $ = (id) => document.getElementById(id);
+
+    // One helper for every API call. The server always returns
+    // { success, data, error, meta }, so we handle errors in one place.
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+      const json = await response.json();
+      if (!json.success) {
+        const details = json.error.details ? ": " + json.error.details.join(", ") : "";
+        throw new Error(json.error.message + details);
+      }
+      return json;
+    }
+
+    function showMessage(text, type) {
+      $("message").textContent = text;
+      $("message").className = type || "";
+    }
+
+    async function loadItems() {
+      showMessage("Loading...", "");
+      try {
+        const params = new URLSearchParams({ page: state.page, limit: state.limit, search: state.search });
+        const { data, meta } = await api("/api/items?" + params);
+        renderRows(data);
+        $("page-info").textContent = `Page ${meta.page} of ${meta.totalPages} (${meta.total} items)`;
+        $("prev").disabled = meta.page <= 1;
+        $("next").disabled = meta.page >= meta.totalPages;
+        showMessage(data.length ? "" : "No items found.", "");
+      } catch (err) {
+        showMessage("Could not load items: " + err.message, "error");
+      }
+    }
+
+    function renderRows(list) {
+      const rows = $("rows");
+      rows.innerHTML = "";
+      for (const item of list) {
+        const tr = document.createElement("tr");
+        // textContent (not innerHTML) so item names can never inject HTML.
+        for (const value of [item.name, item.category, item.quantity, "$" + item.price.toFixed(2)]) {
+          const td = document.createElement("td");
+          td.textContent = value;
+          tr.appendChild(td);
+        }
+        const actions = document.createElement("td");
+        const edit = document.createElement("button");
+        edit.textContent = "Edit";
+        edit.className = "secondary";
+        edit.onclick = () => startEdit(item);
+        const del = document.createElement("button");
+        del.textContent = "Delete";
+        del.className = "danger";
+        del.onclick = () => removeItem(item);
+        actions.append(edit, " ", del);
+        tr.appendChild(actions);
+        rows.appendChild(tr);
+      }
+    }
+
+    function startEdit(item) {
+      $("item-id").value = item.id;
+      $("name").value = item.name;
+      $("category").value = item.category;
+      $("quantity").value = item.quantity;
+      $("price").value = item.price;
+      $("save-btn").textContent = "Save changes";
+      $("cancel-btn").hidden = false;
+    }
+
+    function resetForm() {
+      $("item-form").reset();
+      $("item-id").value = "";
+      $("save-btn").textContent = "Add item";
+      $("cancel-btn").hidden = true;
+    }
+
+    async function removeItem(item) {
+      if (!confirm(`Delete "${item.name}"?`)) return;
+      try {
+        await api("/api/items/" + item.id, { method: "DELETE" });
+        showMessage("Item deleted.", "info");
+        loadItems();
+      } catch (err) {
+        showMessage(err.message, "error");
+      }
+    }
+
+    $("item-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const id = $("item-id").value;
+      const body = {
+        name: $("name").value,
+        category: $("category").value,
+        quantity: Number($("quantity").value),
+        price: Number($("price").value),
+      };
+      try {
+        await api(id ? "/api/items/" + id : "/api/items", {
+          method: id ? "PUT" : "POST",
+          body: JSON.stringify(body),
+        });
+        showMessage(id ? "Item updated." : "Item added.", "info");
+        resetForm();
+        loadItems();
+      } catch (err) {
+        showMessage(err.message, "error");
+      }
+    });
+
+    $("cancel-btn").onclick = resetForm;
+    $("prev").onclick = () => { state.page--; loadItems(); };
+    $("next").onclick = () => { state.page++; loadItems(); };
+
+    // Performance: wait until the user stops typing before calling the API.
+    let timer;
+    $("search").addEventListener("input", (event) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        state.search = event.target.value.trim();
+        state.page = 1;
+        loadItems();
+      }, 300);
+    });
+
+    loadItems();
+  </script>
+</body>
+</html>
